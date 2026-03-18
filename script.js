@@ -4,7 +4,6 @@ class AuraWall {
         this.ctx = this.canvas.getContext('2d');
         this.resolutionInfo = document.getElementById('resolution-info');
         this.dateDisplay = document.getElementById('current-date');
-        this.generateBtn = document.getElementById('generate-btn');
         this.downloadBtn = document.getElementById('download-btn');
         this.shareBtn = document.getElementById('share-btn');
         
@@ -23,18 +22,48 @@ class AuraWall {
         this.animateToggle = document.getElementById('animate-toggle');
         this.grainToggle = document.getElementById('grain-toggle');
         this.autogenToggle = document.getElementById('autogen-toggle');
+        this.gyroToggle = document.getElementById('gyro-toggle');
         this.paletteSwatches = document.querySelectorAll('.palette');
 
-        // Load State from URL
-        this.loadStateFromHash();
 
         this.time = 0;
         this.autoGenTimer = 0;
         this.mouse = { x: 0, y: 0 };
         this.targetMouse = { x: 0, y: 0 };
         
+        // Social Modal & Cropping
+        this.socialSaveBtn = document.getElementById('social-save-btn');
+        this.socialModal = document.getElementById('social-modal');
+        this.closeModalBtn = this.socialModal.querySelector('.close-modal');
+        this.socialOptions = this.socialModal.querySelectorAll('.social-option');
+        this.manualCropToggle = document.getElementById('manual-crop-toggle');
+        
+        this.cropOverlay = document.getElementById('crop-overlay');
+        this.cropBox = document.getElementById('crop-box');
+        this.cancelCropBtn = document.getElementById('cancel-crop');
+        this.confirmCropBtn = document.getElementById('confirm-crop');
+        
+        this.isCropping = false;
+        this.cropState = {
+            active: false,
+            x: 0, y: 0,
+            width: 0, height: 0,
+            ratio: 1,
+            label: ''
+        };
+
+        // Swipe Gesture & History State
+        this.touchStart = { x: 0, y: 0 };
+        this.touchThreshold = 70;
+        // Load State from URL
+        this.history = [];
+        this.historyIndex = -1;
+        this.loadStateFromHash();
+        
         this.init();
         this.attachEventListeners();
+        this.initCropResizing(); // Initialize handles
+        this.initGyroscope();
         this.animate();
         this.registerServiceWorker();
     }
@@ -71,8 +100,18 @@ class AuraWall {
             }
         } else {
             this.selectedPattern = 'aurora';
-            this.currentSeed = Math.random() * 1000000;
+            this.currentSeed = this.getDailySeed();
             this.selectedPalette = ['#6366f1', '#ec4899', '#a855f7'];
+            this.updateUIToState();
+        }
+
+        // Push initial state to history if not already there
+        if (this.history.length === 0) {
+            this.pushToHistory({
+                p: this.selectedPattern,
+                s: this.currentSeed,
+                c: [...this.selectedPalette]
+            });
         }
     }
 
@@ -184,13 +223,55 @@ class AuraWall {
             this.targetMouse.y = (e.clientY / window.innerHeight) - 0.5;
         });
 
-        this.generateBtn.addEventListener('click', () => {
+        // Touch/Swipe Events
+        this.canvas.addEventListener('touchstart', (e) => {
+            this.touchStart.x = e.touches[0].clientX;
+            this.touchStart.y = e.touches[0].clientY;
+        }, { passive: true });
+
+        this.canvas.addEventListener('touchmove', (e) => {
+            // Update parallax target for touch
+            this.targetMouse.x = (e.touches[0].clientX / window.innerWidth) - 0.5;
+            this.targetMouse.y = (e.touches[0].clientY / window.innerHeight) - 0.5;
+        }, { passive: true });
+
+        this.canvas.addEventListener('click', (e) => {
+            // New interaction: Clicking only changes SEED within current category
             this.currentSeed = Math.random() * 1000000;
             this.autoGenTimer = 0;
             this.updateHash();
+            this.generate();
         });
 
+        this.canvas.addEventListener('touchend', (e) => {
+            const touchEndX = e.changedTouches[0].clientX;
+            const touchEndY = e.changedTouches[0].clientY;
+            
+            const dx = touchEndX - this.touchStart.x;
+            const dy = touchEndY - this.touchStart.y;
+            
+            // Check for vertical swipe (Reels style)
+            if (Math.abs(dy) > this.touchThreshold && Math.abs(dy) > Math.abs(dx)) {
+                // New interaction: Swiping changes CATEGORY
+                this.cyclePattern(dy > 0 ? -1 : 1); 
+            }
+        }, { passive: true });
+
         this.downloadBtn.addEventListener('click', () => this.download());
+
+        this.gyroToggle.addEventListener('change', () => {
+            if (this.gyroToggle.checked) {
+                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    DeviceOrientationEvent.requestPermission()
+                        .then(state => {
+                            if (state === 'granted') this.showToast('Motion enabled');
+                        })
+                        .catch(e => console.error(e));
+                } else {
+                    this.showToast('Motion enabled');
+                }
+            }
+        });
 
 
         this.shareBtn.addEventListener('click', () => {
@@ -199,6 +280,42 @@ class AuraWall {
                 this.showToast('Link copied to clipboard!');
             });
         });
+
+        this.socialSaveBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.socialModal.classList.add('open');
+        });
+
+        this.closeModalBtn.addEventListener('click', () => {
+            this.socialModal.classList.remove('open');
+        });
+
+        this.socialOptions.forEach(opt => {
+            opt.addEventListener('click', () => {
+                const ratioStr = opt.dataset.ratio;
+                const [rw, rh] = ratioStr.split('/').map(Number);
+                const ratio = rw / rh;
+                const label = opt.dataset.label;
+                
+                this.socialModal.classList.remove('open');
+                
+                if (this.manualCropToggle.checked) {
+                    this.startManualCrop(ratio, label);
+                } else {
+                    this.downloadSocial(ratio, label);
+                }
+            });
+        });
+
+        // Close modal when clicking outside
+        this.socialModal.addEventListener('click', (e) => {
+            if (e.target === this.socialModal) {
+                this.socialModal.classList.remove('open');
+            }
+        });
+
+        this.cancelCropBtn.addEventListener('click', () => this.stopManualCrop());
+        this.confirmCropBtn.addEventListener('click', () => this.executeCrop());
 
         this.settingsToggle.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -282,18 +399,119 @@ class AuraWall {
         }
     }
 
-    selectItem(item) {
+    pushToHistory(state) {
+        // If we're not at the end of history, truncate the "future"
+        if (this.historyIndex < this.history.length - 1) {
+            this.history = this.history.slice(0, this.historyIndex + 1);
+        }
+        this.history.push(state);
+        this.historyIndex = this.history.length - 1;
+        // Keep history manageable
+        if (this.history.length > 50) {
+            this.history.shift();
+            this.historyIndex--;
+        }
+    }
+
+    navigateHistory(direction) {
+        if (direction === -1) { // Previous
+            if (this.historyIndex > 0) {
+                this.historyIndex--;
+                this.applyState(this.history[this.historyIndex]);
+            } else {
+                this.showToast('At the beginning of history');
+            }
+        } else { // Next
+            if (this.historyIndex < this.history.length - 1) {
+                this.historyIndex++;
+                this.applyState(this.history[this.historyIndex]);
+            } else {
+                this.randomizeWallpaper();
+            }
+        }
+    }
+
+    applyState(state) {
+        this.selectedPattern = state.p;
+        this.currentSeed = state.s;
+        this.selectedPalette = state.c;
+        
+        const item = Array.from(this.dropdownItems).find(i => i.dataset.value === this.selectedPattern);
+        if (item) {
+            this.currentPatternLabel.textContent = item.textContent;
+            this.dropdownItems.forEach(i => i.classList.remove('active'));
+            item.classList.add('active');
+            item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+        
+        this.generate();
+        this.updateHash();
+    }
+
+    randomizeWallpaper() {
+        const items = Array.from(this.dropdownItems).filter(item => item.dataset.value);
+        if (items.length === 0) return;
+        
+        const randomIndex = Math.floor(Math.random() * items.length);
+        const randomItem = items[randomIndex];
+        
+        this.selectedPattern = randomItem.dataset.value;
+        this.currentSeed = Math.random() * 1000000;
+        
+        // Push NEW randomized state to history
+        this.pushToHistory({
+            p: this.selectedPattern,
+            s: this.currentSeed,
+            c: [...this.selectedPalette]
+        });
+
+        this.selectItem(randomItem, false); // false = don't push to history again
+    }
+
+    selectItem(item, addToHistory = true) {
         if (!item) return;
         this.selectedPattern = item.dataset.value;
         this.currentPatternLabel.textContent = item.textContent;
         this.dropdownItems.forEach(i => i.classList.remove('active'));
         item.classList.add('active');
         item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+
+        if (addToHistory) {
+            this.pushToHistory({
+                p: this.selectedPattern,
+                s: this.currentSeed,
+                c: [...this.selectedPalette]
+            });
+        }
+
         this.generate();
         this.updateHash();
     }
 
 
+
+    initGyroscope() {
+        // Primary listener (Standard/iOS)
+        if (window.DeviceOrientationEvent) {
+            const sensitivity = 2.0; 
+            const handleOrientation = (e) => {
+                if (!this.gyroToggle.checked) return;
+                if (e.beta !== null && e.gamma !== null) {
+                    const tiltX = (e.gamma / 30) * sensitivity; 
+                    const tiltY = ((e.beta - 45) / 30) * sensitivity; 
+                    this.targetMouse.x = Math.max(-0.6, Math.min(0.6, tiltX));
+                    this.targetMouse.y = Math.max(-0.6, Math.min(0.6, tiltY));
+                }
+            };
+
+            window.addEventListener('deviceorientation', handleOrientation, true);
+            
+            // Android Chrome Fallback
+            if ('ondeviceorientationabsolute' in window) {
+                window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+            }
+        }
+    }
 
     showToast(msg) {
         let toast = document.querySelector('.toast');
@@ -307,71 +525,288 @@ class AuraWall {
         setTimeout(() => toast.classList.remove('show'), 3000);
     }
 
+    startManualCrop(ratio, label) {
+        this.isCropping = true;
+        this.cropState.active = true;
+        this.cropState.ratio = ratio;
+        this.cropState.label = label;
+        
+        const margin = 50;
+        let w = (window.innerWidth - margin * 2) * 0.7;
+        let h = w / ratio;
+        
+        if (h > window.innerHeight - margin * 2) {
+            h = (window.innerHeight - margin * 2) * 0.7;
+            w = h * ratio;
+        }
+        
+        this.cropState.width = w;
+        this.cropState.height = h;
+        this.cropState.x = (window.innerWidth - w) / 2;
+        this.cropState.y = (window.innerHeight - h) / 2;
+        
+        this.cropOverlay.style.display = 'block';
+        this.cropOverlay.classList.add('active');
+        this.updateCropBox();
+        this.showToast(`Drag to adjust ${label}`);
+
+        this.initCropDragging();
+    }
+
+    initCropResizing() {
+        const handles = this.cropOverlay.querySelectorAll('.crop-handle');
+        let isResizing = false;
+        let currentHandle = null;
+        let startX, startY;
+        let startW, startH;
+        let startXBox, startYBox;
+
+        const startResizing = (e, handle) => {
+            isResizing = true;
+            currentHandle = handle;
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            startX = clientX;
+            startY = clientY;
+            startW = this.cropState.width;
+            startH = this.cropState.height;
+            startXBox = this.cropState.x;
+            startYBox = this.cropState.y;
+            e.stopPropagation();
+            if (!e.touches) e.preventDefault();
+        };
+
+        const moveResizing = (e) => {
+            if (!isResizing) return;
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            const dx = clientX - startX;
+            const dy = clientY - startY;
+
+            let newW = startW;
+            let newH = startH;
+            let newX = startXBox;
+            let newY = startYBox;
+
+            if (currentHandle.classList.contains('se')) {
+                newW = Math.max(100, startW + dx);
+                newH = newW / this.cropState.ratio;
+            } else if (currentHandle.classList.contains('sw')) {
+                newW = Math.max(100, startW - dx);
+                newH = newW / this.cropState.ratio;
+                newX = startXBox + (startW - newW);
+            } else if (currentHandle.classList.contains('ne')) {
+                newH = Math.max(100, startH - dy);
+                newW = newH * this.cropState.ratio;
+                newY = startYBox + (startH - newH);
+            } else if (currentHandle.classList.contains('nw')) {
+                newW = Math.max(100, startW - dx);
+                newH = newW / this.cropState.ratio;
+                newX = startXBox + (startW - newW);
+                newY = startYBox + (startH - newH);
+            }
+
+            // Boundary checks
+            if (newX >= 0 && newY >= 0 && newX + newW <= window.innerWidth && newY + newH <= window.innerHeight) {
+                this.cropState.width = newW;
+                this.cropState.height = newH;
+                this.cropState.x = newX;
+                this.cropState.y = newY;
+                this.updateCropBox();
+            }
+        };
+
+        const stopResizing = () => {
+            isResizing = false;
+            currentHandle = null;
+        };
+
+        handles.forEach(handle => {
+            handle.addEventListener('mousedown', (e) => startResizing(e, handle));
+            handle.addEventListener('touchstart', (e) => startResizing(e, handle), { passive: false });
+        });
+
+        window.addEventListener('mousemove', moveResizing);
+        window.addEventListener('touchmove', moveResizing, { passive: false });
+        window.addEventListener('mouseup', stopResizing);
+        window.addEventListener('touchend', stopResizing);
+    }
+
+    initCropDragging() {
+        let isDragging = false;
+        let startX, startY;
+        let startBoxX, startBoxY;
+
+        const startDragging = (e) => {
+            isDragging = true;
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            startX = clientX;
+            startY = clientY;
+            startBoxX = this.cropState.x;
+            startBoxY = this.cropState.y;
+            if (!e.touches) e.preventDefault();
+        };
+
+        const moveDragging = (e) => {
+            if (!isDragging) return;
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            const dx = clientX - startX;
+            const dy = clientY - startY;
+            
+            this.cropState.x = Math.max(0, Math.min(window.innerWidth - this.cropState.width, startBoxX + dx));
+            this.cropState.y = Math.max(0, Math.min(window.innerHeight - this.cropState.height, startBoxY + dy));
+            
+            this.updateCropBox();
+        };
+
+        const stopDragging = () => {
+            isDragging = false;
+        };
+
+        // Desktop
+        this.cropBox.onmousedown = startDragging;
+        window.onmousemove = moveDragging;
+        window.onmouseup = stopDragging;
+
+        // Mobile
+        this.cropBox.ontouchstart = startDragging;
+        window.ontouchmove = moveDragging;
+        window.ontouchend = stopDragging;
+    }
+
+    updateCropBox() {
+        this.cropBox.style.width = `${this.cropState.width}px`;
+        this.cropBox.style.height = `${this.cropState.height}px`;
+        this.cropBox.style.left = `${this.cropState.x}px`;
+        this.cropBox.style.top = `${this.cropState.y}px`;
+    }
+
+    stopManualCrop() {
+        this.isCropping = false;
+        this.cropState.active = false;
+        this.cropOverlay.style.display = 'none';
+        this.cropOverlay.classList.remove('active');
+        this.cropBox.onmousedown = null;
+        window.onmousemove = null;
+        window.onmouseup = null;
+    }
+
+    executeCrop() {
+        const dpr = window.devicePixelRatio || 1;
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = this.cropState.width * dpr;
+        tempCanvas.height = this.cropState.height * dpr;
+        const tempCtx = tempCanvas.getContext('2d');
+        
+        // Use exact dpr-adjusted positions for the high-res buffer
+        tempCtx.drawImage(
+            this.canvas,
+            this.cropState.x * dpr, this.cropState.y * dpr,
+            this.cropState.width * dpr, this.cropState.height * dpr,
+            0, 0,
+            tempCanvas.width, tempCanvas.height
+        );
+        
+        const link = document.createElement('a');
+        const timestamp = Date.now();
+        link.download = `AuraWall-${this.cropState.label.replace(/\s+/g, '-')}-${timestamp}.png`;
+        link.href = tempCanvas.toDataURL('image/png', 1.0);
+        link.click();
+        
+        this.stopManualCrop();
+        this.showToast('Image saved!');
+    }
+
+    downloadSocial(ratio, label) {
+        // High quality render
+        const targetWidth = 2400; 
+        const targetHeight = targetWidth / ratio;
+        
+        const hqCanvas = document.createElement('canvas');
+        hqCanvas.width = targetWidth;
+        hqCanvas.height = targetHeight;
+        const hqCtx = hqCanvas.getContext('2d');
+
+        // Hackily swap context for rendering
+        const originalCtx = this.ctx;
+        this.ctx = hqCtx;
+        
+        // Re-generate current pattern with current seed on HQ canvas
+        this.generate(this.currentSeed, targetWidth, targetHeight);
+        
+        const link = document.createElement('a');
+        const timestamp = Date.now();
+        link.download = `AuraWall-${label.replace(/\s+/g, '-')}-${timestamp}.png`;
+        link.href = hqCanvas.toDataURL('image/png', 1.0);
+        link.click();
+        
+        // Restore context
+        this.ctx = originalCtx;
+        this.showToast(`${label} saved!`);
+    }
+
     seededRandom(seed) {
         const x = Math.sin(seed++) * 10000;
         return x - Math.floor(x);
     }
 
-    generate() {
+    generate(seed = this.currentSeed, w = window.innerWidth, h = window.innerHeight) {
         const pattern = this.selectedPattern;
-        let seed = this.currentSeed;
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.ctx.clearRect(0, 0, w, h);
 
         switch(pattern) {
-            case 'aurora': this.renderAurora(seed); break;
-            case 'geometric': this.renderGeometric(seed); break;
-            case 'nebula': this.renderNebula(seed); break;
-            case 'minimal': this.renderMinimal(seed); break;
-            case 'solid': this.renderSolid(seed); break;
-            case 'linear': this.renderLinear(seed); break;
-            case 'radial': this.renderRadial(seed); break;
-            case 'mesh': this.renderMesh(seed); break;
-            case 'rain': this.renderRain(seed); break;
-            case 'smokey': this.renderSmokey(seed); break;
-            case 'matrix': this.renderMatrix(seed); break;
-            case 'binary': this.renderBinary(seed); break;
-            case 'neon': this.renderNeon(seed); break;
-            case 'ink': this.renderInk(seed); break;
-            case 'void': this.renderVoid(seed); break;
-            case 'grid': this.renderGrid(seed); break;
-            case 'glass': this.renderGlass(seed); break;
-            case 'silk2': this.renderSilk2(seed); break;
-            case 'speed': this.renderSpeed(seed); break;
-            case 'circuit': this.renderCircuit(seed); break;
-            case 'vortex': this.renderVortex(seed); break;
-            case 'electric': this.renderElectric(seed); break;
-            case 'poly': this.renderPoly(seed); break;
-            case 'crystal': this.renderCrystal(seed); break;
-            case 'ocean': this.renderOcean(seed); break;
-            case 'fire': this.renderFire(seed); break;
-            case 'clouds': this.renderClouds(seed); break;
-            case 'snow': this.renderSnow(seed); break;
-            case 'crt': this.renderCRT(seed); break;
-            case 'vhs': this.renderVHS(seed); break;
-            case 'pixel': this.renderPixel(seed); break;
-            case 'sunset': this.renderSunset(seed); break;
-            case 'mandelbrot': this.renderMandelbrot(seed); break;
-            case 'julia': this.renderJulia(seed); break;
-            case 'voronoi': this.renderVoronoi(seed); break;
-            case 'delaunay': this.renderDelaunay(seed); break;
-            case 'cellular': this.renderCellular(seed); break;
-            case 'slime': this.renderSlime(seed); break;
-            case 'coral': this.renderCoral(seed); break;
-            case 'plasma': this.renderPlasma(seed); break;
-            case 'wormhole': this.renderWormhole(seed); break;
-            case 'data': this.renderData(seed); break;
-            case 'hologram': this.renderHologram(seed); break;
-            case 'dots': this.renderDots(seed); break;
-            case 'spheres': this.renderSpheres(seed); break;
-            case 'paper': this.renderPaper(seed); break;
-            case 'soft': this.renderSoft(seed); break;
+            case 'aurora': this.renderAurora(seed, w, h); break;
+            case 'geometric': this.renderGeometric(seed, w, h); break;
+            case 'nebula': this.renderNebula(seed, w, h); break;
+            case 'minimal': this.renderMinimal(seed, w, h); break;
+            case 'solid': this.renderSolid(seed, w, h); break;
+            case 'linear': this.renderLinear(seed, w, h); break;
+            case 'radial': this.renderRadial(seed, w, h); break;
+            case 'mesh': this.renderMesh(seed, w, h); break;
+            case 'rain': this.renderRain(seed, w, h); break;
+            case 'smokey': this.renderSmokey(seed, w, h); break;
+            case 'matrix': this.renderMatrix(seed, w, h); break;
+            case 'binary': this.renderBinary(seed, w, h); break;
+            case 'neon': this.renderNeon(seed, w, h); break;
+            case 'ink': this.renderInk(seed, w, h); break;
+            case 'void': this.renderVoid(seed, w, h); break;
+            case 'grid': this.renderGrid(seed, w, h); break;
+            case 'glass': this.renderGlass(seed, w, h); break;
+            case 'silk2': this.renderSilk2(seed, w, h); break;
+            case 'speed': this.renderSpeed(seed, w, h); break;
+            case 'circuit': this.renderCircuit(seed, w, h); break;
+            case 'vortex': this.renderVortex(seed, w, h); break;
+            case 'electric': this.renderElectric(seed, w, h); break;
+            case 'poly': this.renderPoly(seed, w, h); break;
+            case 'crystal': this.renderCrystal(seed, w, h); break;
+            case 'ocean': this.renderOcean(seed, w, h); break;
+            case 'fire': this.renderFire(seed, w, h); break;
+            case 'clouds': this.renderClouds(seed, w, h); break;
+            case 'snow': this.renderSnow(seed, w, h); break;
+            case 'crt': this.renderCRT(seed, w, h); break;
+            case 'vhs': this.renderVHS(seed, w, h); break;
+            case 'pixel': this.renderPixel(seed, w, h); break;
+            case 'sunset': this.renderSunset(seed, w, h); break;
+            case 'voronoi': this.renderVoronoi(seed, w, h); break;
+            case 'delaunay': this.renderDelaunay(seed, w, h); break;
+            case 'cellular': this.renderCellular(seed, w, h); break;
+            case 'slime': this.renderSlime(seed, w, h); break;
+            case 'coral': this.renderCoral(seed, w, h); break;
+            case 'plasma': this.renderPlasma(seed, w, h); break;
+            case 'wormhole': this.renderWormhole(seed, w, h); break;
+            case 'data': this.renderData(seed, w, h); break;
+            case 'hologram': this.renderHologram(seed, w, h); break;
+            case 'dots': this.renderDots(seed, w, h); break;
+            case 'spheres': this.renderSpheres(seed, w, h); break;
+            case 'paper': this.renderPaper(seed, w, h); break;
+            case 'soft': this.renderSoft(seed, w, h); break;
         }
     }
 
-    renderOcean(seed) {
+    renderOcean(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         this.ctx.fillStyle = '#0a192f';
@@ -401,10 +836,8 @@ class AuraWall {
         }
     }
 
-    renderFire(seed) {
+    renderFire(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         this.ctx.fillStyle = '#050000';
@@ -430,10 +863,8 @@ class AuraWall {
         this.ctx.shadowBlur = 0;
     }
 
-    renderClouds(seed) {
+    renderClouds(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         const baseColor = this.selectedPalette[0];
@@ -458,10 +889,8 @@ class AuraWall {
         }
     }
 
-    renderSnow(seed) {
+    renderSnow(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         this.ctx.fillStyle = '#050510';
@@ -482,10 +911,8 @@ class AuraWall {
         this.ctx.globalAlpha = 1.0;
     }
 
-    renderVortex(seed) {
+    renderVortex(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         this.ctx.fillStyle = '#050508';
@@ -509,10 +936,8 @@ class AuraWall {
         }
     }
 
-    renderElectric(seed) {
+    renderElectric(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         this.ctx.fillStyle = '#00000a';
@@ -542,10 +967,8 @@ class AuraWall {
         this.ctx.shadowBlur = 0;
     }
 
-    renderPoly(seed) {
+    renderPoly(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         const baseColor = this.selectedPalette[0];
@@ -576,10 +999,8 @@ class AuraWall {
         }
     }
 
-    renderCrystal(seed) {
+    renderCrystal(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         this.ctx.fillStyle = '#0a0a0c';
@@ -617,10 +1038,8 @@ class AuraWall {
         }
     }
 
-    renderGlass(seed) {
+    renderGlass(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         // Dynamic Backdrop
@@ -661,10 +1080,8 @@ class AuraWall {
         }
     }
 
-    renderSilk2(seed) {
+    renderSilk2(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         this.ctx.fillStyle = '#050505';
@@ -691,10 +1108,8 @@ class AuraWall {
         }
     }
 
-    renderSpeed(seed) {
+    renderSpeed(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         this.ctx.fillStyle = '#000';
@@ -722,10 +1137,8 @@ class AuraWall {
         }
     }
 
-    renderCircuit(seed) {
+    renderCircuit(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         this.ctx.fillStyle = '#0a0a0c';
@@ -767,10 +1180,8 @@ class AuraWall {
         this.ctx.shadowBlur = 0;
     }
 
-    renderNeon(seed) {
+    renderNeon(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         this.ctx.fillStyle = '#000000';
@@ -795,10 +1206,8 @@ class AuraWall {
         this.ctx.shadowBlur = 0;
     }
 
-    renderInk(seed) {
+    renderInk(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         this.ctx.fillStyle = '#000000';
@@ -821,10 +1230,8 @@ class AuraWall {
         }
     }
 
-    renderVoid(seed) {
+    renderVoid(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         this.ctx.fillStyle = '#000000';
@@ -853,10 +1260,8 @@ class AuraWall {
         this.ctx.globalAlpha = 1.0;
     }
 
-    renderGrid(seed) {
+    renderGrid(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         this.ctx.fillStyle = '#000000';
@@ -890,10 +1295,8 @@ class AuraWall {
         }
     }
 
-    renderRain(seed) {
+    renderRain(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         // Blurred Background Layer (Muted)
@@ -968,10 +1371,8 @@ class AuraWall {
         }
     }
 
-    renderSmokey(seed) {
+    renderSmokey(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         this.ctx.fillStyle = '#111827';
@@ -996,10 +1397,8 @@ class AuraWall {
         }
     }
 
-    renderMatrix(seed) {
+    renderMatrix(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         this.ctx.fillStyle = '#000000';
@@ -1041,10 +1440,8 @@ class AuraWall {
         }
     }
 
-    renderBinary(seed) {
+    renderBinary(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         this.ctx.fillStyle = '#000000';
@@ -1082,10 +1479,8 @@ class AuraWall {
         }
     }
 
-    renderNeon(seed) {
+    renderNeon(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         this.ctx.fillStyle = '#000000';
         this.ctx.fillRect(0, 0, w, h);
@@ -1106,10 +1501,8 @@ class AuraWall {
         this.ctx.shadowBlur = 0;
     }
 
-    renderInk(seed) {
+    renderInk(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         this.ctx.fillStyle = '#000000';
         this.ctx.fillRect(0, 0, w, h);
         for (let i = 0; i < 5; i++) {
@@ -1127,10 +1520,8 @@ class AuraWall {
         }
     }
 
-    renderGlass(seed) {
+    renderGlass(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         const bgGrad = this.ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, w);
         bgGrad.addColorStop(0, this.getAdjustedColor(this.selectedPalette[0], 0.4));
@@ -1156,10 +1547,8 @@ class AuraWall {
         }
     }
 
-    renderSilk2(seed) {
+    renderSilk2(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         this.ctx.fillStyle = '#050505';
         this.ctx.fillRect(0, 0, w, h);
@@ -1182,10 +1571,8 @@ class AuraWall {
         }
     }
 
-    renderSpeed(seed) {
+    renderSpeed(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         this.ctx.fillStyle = '#000';
         this.ctx.fillRect(0, 0, w, h);
@@ -1208,10 +1595,8 @@ class AuraWall {
         }
     }
 
-    renderCircuit(seed) {
+    renderCircuit(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         this.ctx.fillStyle = '#0a0a0c';
         this.ctx.fillRect(0, 0, w, h);
         const gridSize = 40;
@@ -1235,10 +1620,8 @@ class AuraWall {
         }
     }
 
-    renderVortex(seed) {
+    renderVortex(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         this.ctx.fillStyle = '#050508';
         this.ctx.fillRect(0, 0, w, h);
@@ -1258,10 +1641,8 @@ class AuraWall {
         }
     }
 
-    renderElectric(seed) {
+    renderElectric(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         this.ctx.fillStyle = '#00000a';
         this.ctx.fillRect(0, 0, w, h);
@@ -1286,10 +1667,8 @@ class AuraWall {
         this.ctx.shadowBlur = 0;
     }
 
-    renderPoly(seed) {
+    renderPoly(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         const baseColor = this.selectedPalette[0];
         this.ctx.fillStyle = this.getAdjustedColor(baseColor, 0.2);
@@ -1314,10 +1693,8 @@ class AuraWall {
         }
     }
 
-    renderCrystal(seed) {
+    renderCrystal(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         this.ctx.fillStyle = '#0a0a0c';
         this.ctx.fillRect(0, 0, w, h);
@@ -1349,10 +1726,8 @@ class AuraWall {
         }
     }
 
-    renderOcean(seed) {
+    renderOcean(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         this.ctx.fillStyle = '#0a192f';
         this.ctx.fillRect(0, 0, w, h);
@@ -1376,10 +1751,8 @@ class AuraWall {
         }
     }
 
-    renderFire(seed) {
+    renderFire(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         this.ctx.fillStyle = '#050000';
         this.ctx.fillRect(0, 0, w, h);
@@ -1400,10 +1773,8 @@ class AuraWall {
         this.ctx.shadowBlur = 0;
     }
 
-    renderClouds(seed) {
+    renderClouds(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         const baseColor = this.selectedPalette[0];
         this.ctx.fillStyle = this.getAdjustedColor(baseColor, 0.1);
@@ -1424,10 +1795,8 @@ class AuraWall {
         }
     }
 
-    renderSnow(seed) {
+    renderSnow(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         this.ctx.fillStyle = '#050510';
         this.ctx.fillRect(0, 0, w, h);
@@ -1445,10 +1814,8 @@ class AuraWall {
         this.ctx.globalAlpha = 1.0;
     }
 
-    renderCRT(seed) {
+    renderCRT(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         this.ctx.fillStyle = '#0a0a0c';
         this.ctx.fillRect(0, 0, w, h);
         this.ctx.fillStyle = this.getAdjustedColor(this.selectedPalette[0], 0.1);
@@ -1457,10 +1824,8 @@ class AuraWall {
         for(let i=0; i<1000; i++) this.ctx.fillRect(this.seededRandom(s++)*w, this.seededRandom(s++)*h, 1, 1);
     }
 
-    renderVHS(seed) {
+    renderVHS(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         this.ctx.fillStyle = '#0a0a0c';
         this.ctx.fillRect(0, 0, w, h);
         for(let i=0; i<5; i++) {
@@ -1470,10 +1835,8 @@ class AuraWall {
         }
     }
 
-    renderPixel(seed) {
+    renderPixel(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const size = 30;
         for(let x=0; x<w; x+=size) {
             for(let y=0; y<h; y+=size) {
@@ -1484,10 +1847,8 @@ class AuraWall {
         }
     }
 
-    renderSunset(seed) {
+    renderSunset(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         const skyGrad = this.ctx.createLinearGradient(0, 0, 0, h);
@@ -1524,78 +1885,9 @@ class AuraWall {
         }
     }
 
-    renderMandelbrot(seed) {
-        const w = window.innerWidth;
-        const h = window.innerHeight;
-        this.ctx.fillStyle = '#000';
-        this.ctx.fillRect(0, 0, w, h);
-        
-        let s = seed;
-        const complexity = parseInt(this.complexitySlider.value);
-        const maxIter = 30 + Math.floor(complexity / 2); // Resp to complexity
-        const zoom = 1.0 + this.seededRandom(s++) * 0.5; // Seeded zoom
-        const offsetX = (this.seededRandom(s++) - 0.5) * 0.5; // Seeded offset
-        const offsetY = (this.seededRandom(s++) - 0.5) * 0.5;
-        
-        const step = complexity > 80 ? 2 : 4; 
-        for (let px = 0; px < w; px += step) {
-            for (let py = 0; py < h; py += step) {
-                let x0 = (px / w - 0.5) * 3.5 / zoom - 0.5 + offsetX;
-                let y0 = (py / h - 0.5) * 2 / zoom + offsetY;
-                let x = 0, y = 0, iter = 0;
-                while (x*x + y*y <= 4 && iter < maxIter) {
-                    let xtemp = x*x - y*y + x0;
-                    y = 2*x*y + y0;
-                    x = xtemp;
-                    iter++;
-                }
-                if (iter < maxIter) {
-                    const color = this.selectedPalette[iter % this.selectedPalette.length];
-                    this.ctx.fillStyle = this.getAdjustedColor(color, 0.5 + (iter / maxIter) * 0.5);
-                    this.ctx.fillRect(px, py, step, step);
-                }
-            }
-        }
-    }
 
-    renderJulia(seed) {
-        const w = window.innerWidth;
-        const h = window.innerHeight;
-        this.ctx.fillStyle = '#000';
-        this.ctx.fillRect(0, 0, w, h);
-        
+    renderVoronoi(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const complexity = parseInt(this.complexitySlider.value);
-        const maxIter = 25 + Math.floor(complexity / 3);
-        
-        // Seeded constants
-        const cx = -0.7 + Math.sin(this.time * 0.5 + s) * 0.1 + (this.seededRandom(s++) - 0.5) * 0.2;
-        const cy = 0.27015 + (this.seededRandom(s++) - 0.5) * 0.1;
-        
-        const step = complexity > 80 ? 2 : 4;
-        for (let px = 0; px < w; px += step) {
-            for (let py = 0; py < h; py += step) {
-                let x = (px / w - 0.5) * 3;
-                let y = (py / h - 0.5) * 2;
-                let iter = 0;
-                while (x*x + y*y <= 4 && iter < maxIter) {
-                    let xtemp = x*x - y*y + cx;
-                    y = 2*x*y + cy;
-                    x = xtemp;
-                    iter++;
-                }
-                if (iter < maxIter) {
-                    const color = this.selectedPalette[iter % this.selectedPalette.length];
-                    this.ctx.fillStyle = this.getAdjustedColor(color, 0.5 + (iter / maxIter) * 0.5);
-                    this.ctx.fillRect(px, py, step, step);
-                }
-            }
-        }
-    }
-    renderVoronoi(seed) {
-        let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         this.ctx.fillStyle = '#000';
         this.ctx.fillRect(0, 0, w, h);
@@ -1628,10 +1920,8 @@ class AuraWall {
         }
     }
 
-    renderDelaunay(seed) {
+    renderDelaunay(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         this.ctx.fillStyle = '#0f172a';
         this.ctx.fillRect(0, 0, w, h);
@@ -1656,10 +1946,8 @@ class AuraWall {
         }
     }
 
-    renderCellular(seed) {
+    renderCellular(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         this.ctx.fillStyle = '#0a0a0c';
         this.ctx.fillRect(0, 0, w, h);
@@ -1699,10 +1987,8 @@ class AuraWall {
             cells = nextCells;
         }
     }
-    renderSlime(seed) {
+    renderSlime(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         this.ctx.fillStyle = '#051005';
         this.ctx.fillRect(0, 0, w, h);
         for(let i=0; i<15; i++) {
@@ -1713,10 +1999,8 @@ class AuraWall {
         }
     }
 
-    renderCoral(seed) {
+    renderCoral(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         this.ctx.fillStyle = '#0a0505';
         this.ctx.fillRect(0, 0, w, h);
 
@@ -1740,10 +2024,8 @@ class AuraWall {
         }
     }
 
-    renderPlasma(seed) {
+    renderPlasma(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         // Multi-layered seeded gradient
@@ -1766,10 +2048,8 @@ class AuraWall {
         }
     }
 
-    renderWormhole(seed) {
+    renderWormhole(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         this.ctx.fillStyle = '#000';
@@ -1791,10 +2071,8 @@ class AuraWall {
         }
     }
 
-    renderData(seed) {
+    renderData(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         this.ctx.fillStyle = '#050505';
         this.ctx.fillRect(0, 0, w, h);
         for(let i=0; i<40; i++) {
@@ -1803,10 +2081,8 @@ class AuraWall {
         }
     }
 
-    renderHologram(seed) {
+    renderHologram(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         const baseColor = this.selectedPalette[Math.floor(this.seededRandom(s++) * this.selectedPalette.length)];
@@ -1821,10 +2097,8 @@ class AuraWall {
         }
     }
 
-    renderDots(seed) {
+    renderDots(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         this.ctx.fillStyle = '#fff';
         this.ctx.fillRect(0, 0, w, h);
         for(let i=0; i<40; i++) {
@@ -1835,10 +2109,8 @@ class AuraWall {
         }
     }
 
-    renderSpheres(seed) {
+    renderSpheres(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         for(let i=0; i<6; i++) {
             const x = this.seededRandom(s++)*w;
             const y = this.seededRandom(s++)*h;
@@ -1852,10 +2124,8 @@ class AuraWall {
         }
     }
 
-    renderPaper(seed) {
+    renderPaper(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         this.ctx.fillStyle = '#f5f5f5';
@@ -1884,10 +2154,8 @@ class AuraWall {
         }
     }
 
-    renderSoft(seed) {
+    renderSoft(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         const c1 = this.selectedPalette[Math.floor(this.seededRandom(s++) * this.selectedPalette.length)];
@@ -1976,10 +2244,8 @@ class AuraWall {
         this.ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
     }
 
-    renderMesh(seed) {
+    renderMesh(seed, w = window.innerWidth, h = window.innerHeight) {
         let s = seed;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
         const complexity = parseInt(this.complexitySlider.value);
         
         const baseColor = this.selectedPalette[Math.floor(this.seededRandom(s++) * this.selectedPalette.length)];
@@ -2045,9 +2311,7 @@ class AuraWall {
         this.ctx.globalAlpha = 1.0;
     }
 
-    renderAurora(seed) {
-        const w = window.innerWidth;
-        const h = window.innerHeight;
+    renderAurora(seed, w = window.innerWidth, h = window.innerHeight) {
         const complexity = parseInt(this.complexitySlider.value) / 10;
         const hueBase = parseInt(this.hueSlider.value);
         
@@ -2120,9 +2384,7 @@ class AuraWall {
         this.ctx.globalAlpha = 1.0;
     }
 
-    renderNebula(seed) {
-        const w = window.innerWidth;
-        const h = window.innerHeight;
+    renderNebula(seed, w = window.innerWidth, h = window.innerHeight) {
         const complexity = parseInt(this.complexitySlider.value) / 5;
         let s = seed;
 
@@ -2157,9 +2419,7 @@ class AuraWall {
         this.ctx.globalAlpha = 1.0;
     }
 
-    renderMinimal(seed) {
-        const w = window.innerWidth;
-        const h = window.innerHeight;
+    renderMinimal(seed, w = window.innerWidth, h = window.innerHeight) {
         const complexity = parseInt(this.complexitySlider.value);
         let s = seed;
 

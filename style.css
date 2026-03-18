@@ -61,6 +61,7 @@ header {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    pointer-events: none; /* Allow pass-through */
 }
 
 .logo {
@@ -85,6 +86,7 @@ main {
     text-align: center;
     max-width: 600px;
     margin: 0 auto;
+    pointer-events: none; /* Allow pass-through */
 }
 
 .hero-text h1 {
@@ -112,8 +114,8 @@ main {
     flex-direction: column;
     align-items: center;
     gap: 1.2rem;
-    margin-bottom: 6rem; /* Moved higher to avoid taskbar */
-    transform: scale(0.95); /* Slight scale down as requested */
+    margin-bottom: 9rem; /* Increased to avoid mobile OS bars/dynamic islands */
+    transform: scale(0.95);
 }
 
 .control-group {
@@ -505,5 +507,230 @@ footer {
     .secondary-btn {
         width: 3rem;
         height: 3rem;
+    }
+}
+
+/* Social Save Modal */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(10px);
+    z-index: 2000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    animation: fadeIn 0.3s ease;
+    pointer-events: auto;
+}
+
+.modal.open {
+    display: flex;
+}
+
+.modal-content {
+    background: #111;
+    border: 1px solid var(--glass-border);
+    border-radius: 2rem;
+    padding: 2.5rem;
+    width: 90%;
+    max-width: 650px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.8);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+}
+
+.modal-header h2 {
+    font-family: var(--font-heading);
+    font-size: 1.5rem;
+}
+
+.close-modal {
+    background: transparent;
+    color: var(--text-sub);
+    font-size: 2rem;
+    line-height: 1;
+    padding: 0;
+    cursor: pointer;
+    width: auto;
+    height: auto;
+}
+
+.social-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.25rem;
+    margin-bottom: 2rem;
+}
+
+.social-option {
+    background: var(--glass);
+    border: 1px solid var(--glass-border);
+    border-radius: 1.25rem;
+    padding: 1.25rem;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+}
+
+.social-option:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: var(--accent);
+    transform: translateY(-4px);
+}
+
+.ratio-preview {
+    background: var(--accent);
+    opacity: 0.3;
+    border-radius: 6px;
+    margin-bottom: 1rem;
+    width: 100%;
+}
+
+.ratio-preview.ratio-16-9 { aspect-ratio: 16/9; }
+.ratio-preview.ratio-3-1 { aspect-ratio: 3/1; }
+.ratio-preview.ratio-191-1 { aspect-ratio: 1.91/1; }
+.ratio-preview.ratio-1-1 { aspect-ratio: 1/1; }
+.ratio-preview.ratio-9-16 { aspect-ratio: 9/16; width: 45%; margin: 0 auto 1rem; }
+.ratio-preview.ratio-10-3 { aspect-ratio: 10/3; }
+
+.social-option span {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--text-main);
+    text-align: center;
+}
+
+.crop-section {
+    border-top: 1px solid var(--glass-border);
+    padding-top: 1.5rem;
+}
+
+.crop-hint {
+    font-size: 0.75rem;
+    color: var(--text-sub);
+    margin-top: 0.6rem;
+}
+
+/* Crop Overlay */
+.crop-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 1500;
+    display: none;
+    pointer-events: auto;
+}
+
+.crop-overlay.active {
+    display: block;
+}
+
+.crop-box {
+    position: absolute;
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6);
+    cursor: move;
+}
+
+.crop-handle {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    background: #fff;
+    border-radius: 50%;
+    box-shadow: 0 0 10px rgba(0,0,0,0.5);
+}
+
+.crop-handle.nw { top: -7px; left: -7px; cursor: nw-resize; }
+.crop-handle.ne { top: -7px; right: -7px; cursor: ne-resize; }
+.crop-handle.sw { bottom: -7px; left: -7px; cursor: sw-resize; }
+.crop-handle.se { bottom: -7px; right: -7px; cursor: se-resize; }
+
+.crop-controls {
+    position: absolute;
+    bottom: 3rem;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 1.5rem;
+    z-index: 1600;
+}
+
+/* Custom Checkbox */
+.checkbox-container {
+    display: flex;
+    align-items: center;
+    position: relative;
+    padding-left: 2.5rem;
+    cursor: pointer;
+    font-size: 0.85rem;
+    user-select: none;
+}
+
+.checkbox-container input {
+    position: absolute;
+    opacity: 0;
+    cursor: pointer;
+    height: 0;
+    width: 0;
+}
+
+.checkmark {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    transform: translateY(-50%);
+    height: 22px;
+    width: 22px;
+    background-color: var(--glass);
+    border: 1px solid var(--glass-border);
+    border-radius: 6px;
+    transition: all 0.2s ease;
+}
+
+.checkbox-container:hover input ~ .checkmark {
+    background-color: rgba(255,255,255,0.1);
+}
+
+.checkbox-container input:checked ~ .checkmark {
+    background-color: var(--accent);
+    border-color: var(--accent);
+}
+
+.checkmark:after {
+    content: "";
+    position: absolute;
+    display: none;
+}
+
+.checkbox-container input:checked ~ .checkmark:after {
+    display: block;
+}
+
+.checkbox-container .checkmark:after {
+    left: 8px;
+    top: 4px;
+    width: 5px;
+    height: 10px;
+    border: solid white;
+    border-width: 0 2.5px 2.5px 0;
+    transform: rotate(45deg);
+}
+
+@media (max-width: 600px) {
+    .social-grid {
+        grid-template-columns: repeat(2, 1fr);
     }
 }
