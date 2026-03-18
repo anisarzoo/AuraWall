@@ -1660,29 +1660,41 @@ class AuraWall {
         let s = seed;
         const w = window.innerWidth;
         const h = window.innerHeight;
-        this.ctx.fillStyle = '#111';
+        const complexity = parseInt(this.complexitySlider.value);
+        this.ctx.fillStyle = '#0a0a0c';
         this.ctx.fillRect(0, 0, w, h);
 
-        const size = 10;
+        const size = Math.max(4, 16 - Math.floor(complexity / 8)); // Complexity affects size
         const rows = Math.floor(h / size);
         const cols = Math.floor(w / size);
+        
+        // Seeded rule generation (0-255)
+        const ruleNumber = Math.floor(this.seededRandom(s++) * 256);
+        const rules = [];
+        for (let i = 0; i < 8; i++) {
+            rules.push((ruleNumber >> i) & 1);
+        }
+
+        // Seeded initial state
         let cells = new Array(cols).fill(0);
+        for (let c = 0; c < cols; c++) {
+            if (this.seededRandom(s++) > 0.9) cells[c] = 1;
+        }
         cells[Math.floor(cols/2)] = 1;
 
-        const rules = [0,1,1,1,1,0,0,0]; // Rule 30
-        
         for(let r=0; r<rows; r++) {
             let nextCells = new Array(cols).fill(0);
             for(let c=0; c<cols; c++) {
                 if(cells[c]) {
-                    this.ctx.fillStyle = this.getAdjustedColor(this.selectedPalette[r%3], 0.8);
-                    this.ctx.fillRect(c*size, r*size, size-1, size-1);
+                    const paletteColor = this.selectedPalette[r % this.selectedPalette.length];
+                    this.ctx.fillStyle = this.getAdjustedColor(paletteColor, 0.8);
+                    this.ctx.fillRect(c * size, r * size, size - 1, size - 1);
                 }
-                const left = cells[(c-1+cols)%cols];
+                const left = cells[(c - 1 + cols) % cols];
                 const mid = cells[c];
-                const right = cells[(c+1)%cols];
+                const right = cells[(c + 1) % cols];
                 const type = (left << 2) | (mid << 1) | right;
-                nextCells[c] = rules[7-type];
+                nextCells[c] = rules[type];
             }
             cells = nextCells;
         }
