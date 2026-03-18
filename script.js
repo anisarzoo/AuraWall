@@ -6,7 +6,6 @@ class AuraWall {
         this.dateDisplay = document.getElementById('current-date');
         this.generateBtn = document.getElementById('generate-btn');
         this.downloadBtn = document.getElementById('download-btn');
-        this.recordBtn = document.getElementById('record-btn');
         this.shareBtn = document.getElementById('share-btn');
         
         // Custom Dropdown
@@ -31,7 +30,6 @@ class AuraWall {
 
         this.time = 0;
         this.autoGenTimer = 0;
-        this.isRecording = false;
         this.mouse = { x: 0, y: 0 };
         this.targetMouse = { x: 0, y: 0 };
         
@@ -167,8 +165,6 @@ class AuraWall {
                 this.generateBtn.click();
             } else if (e.code === 'KeyS') {
                 this.downloadBtn.click();
-            } else if (e.code === 'KeyR') {
-                this.recordBtn.click();
             } else if (e.code === 'KeyC') {
                 this.settingsToggle.click();
             }
@@ -194,7 +190,6 @@ class AuraWall {
             this.updateHash();
         });
 
-        this.recordBtn.addEventListener('click', () => this.toggleRecording());
         this.downloadBtn.addEventListener('click', () => this.download());
 
 
@@ -298,53 +293,7 @@ class AuraWall {
         this.updateHash();
     }
 
-    toggleRecording() {
-        if (this.isRecording) {
-            this.stopRecording();
-        } else {
-            this.startRecording();
-        }
-    }
 
-    startRecording() {
-        this.isRecording = true;
-        this.recordBtn.classList.add('recording');
-        this.showToast('Recording... (5 seconds)');
-        
-        const stream = this.canvas.captureStream(60);
-        this.recorder = new MediaRecorder(stream, {
-            mimeType: 'video/webm;codecs=vp9',
-            videoBitsPerSecond: 5000000 // 5Mbps
-        });
-
-        this.chunks = [];
-        this.recorder.ondataavailable = (e) => this.chunks.push(e.data);
-        this.recorder.onstop = () => this.saveVideo();
-
-        this.recorder.start();
-
-        // Auto stop after 5 seconds
-        setTimeout(() => {
-            if (this.isRecording) this.stopRecording();
-        }, 5000);
-    }
-
-    stopRecording() {
-        this.isRecording = false;
-        this.recordBtn.classList.remove('recording');
-        this.recorder.stop();
-        this.showToast('Processing video...');
-    }
-
-    saveVideo() {
-        const blob = new Blob(this.chunks, { type: 'video/webm' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `AuraWall-Live-${Date.now()}.webm`;
-        link.click();
-        URL.revokeObjectURL(url);
-    }
 
     showToast(msg) {
         let toast = document.querySelector('.toast');

@@ -201,7 +201,7 @@ button {
 
 .dropdown-menu {
     position: absolute;
-    bottom: calc(100% + 10px); /* Open upwards to stay away from taskbar */
+    top: calc(100% + 10px); /* Open downwards as requested */
     left: 0;
     width: 100%;
     max-height: 300px;
@@ -219,7 +219,7 @@ button {
     gap: 0.2rem;
     box-shadow: 0 10px 40px rgba(0,0,0,0.8);
     z-index: 100;
-    animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    animation: slideDown 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     padding-right: 12px; /* Space for the scrollbar */
 }
 
@@ -401,10 +401,10 @@ input[type="range"]::-webkit-slider-thumb {
     box-shadow: 0 0 10px var(--accent);
 }
 
-@keyframes slideUp {
+@keyframes slideDown {
     from { 
         opacity: 0; 
-        transform: translateY(10px); 
+        transform: translateY(-10px); 
     }
     to { 
         opacity: 1; 
@@ -440,18 +440,7 @@ input[type="range"]::-webkit-slider-thumb {
     opacity: 1;
 }
 
-#record-btn.recording {
-    background: rgba(239, 68, 68, 0.2);
-    border-color: #ef4444;
-    color: #ef4444;
-    animation: pulseRed 1.5s infinite;
-}
 
-@keyframes pulseRed {
-    0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
-    70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
-}
 
 @keyframes fadeIn {
     from { opacity: 0; transform: scale(0.95); }
