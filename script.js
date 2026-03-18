@@ -1750,6 +1750,10 @@ class AuraWall {
             grad.addColorStop(1, 'transparent');
             
             this.ctx.fillStyle = grad;
+            this.ctx.fillRect(0, 0, w, h);
+        }
+    }
+
     renderWormhole(seed) {
         let s = seed;
         const w = window.innerWidth;
