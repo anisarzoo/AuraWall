@@ -195,6 +195,8 @@ class AuraWall {
         });
 
         this.recordBtn.addEventListener('click', () => this.toggleRecording());
+        this.downloadBtn.addEventListener('click', () => this.download());
+
 
         this.shareBtn.addEventListener('click', () => {
             const url = window.location.href;
