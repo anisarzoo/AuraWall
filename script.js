@@ -862,17 +862,20 @@ class AuraWall {
         this.ctx.fillStyle = '#000000';
         this.ctx.fillRect(0, 0, w, h);
 
-        const color = this.getAdjustedColor(this.selectedPalette[0], 0.4);
+        const mainColor = this.selectedPalette[Math.floor(this.seededRandom(s++) * this.selectedPalette.length)];
+        const color = this.getAdjustedColor(mainColor, 0.4);
         this.ctx.strokeStyle = color;
         this.ctx.lineWidth = 1;
         
-        const horizon = h * 0.6;
+        const horizon = h * (0.4 + this.seededRandom(s++) * 0.3); // Seeded horizon
         const step = 40 + (complexity / 2);
+        
+        const vanishX = w / 2 + (this.mouse.x * 100) + (this.seededRandom(s++) - 0.5) * 200; // Seeded vanishing point
         
         // Vertical lines
         for (let x = -w; x < w * 2; x += step) {
             this.ctx.beginPath();
-            this.ctx.moveTo(w / 2 + (x - w / 2) * 0.1, horizon);
+            this.ctx.moveTo(vanishX + (x - w / 2) * 0.1, horizon);
             this.ctx.lineTo(x + this.mouse.x * 100, h);
             this.ctx.stroke();
         }
@@ -1485,15 +1488,40 @@ class AuraWall {
         let s = seed;
         const w = window.innerWidth;
         const h = window.innerHeight;
-        const grad = this.ctx.createLinearGradient(0, 0, 0, h);
-        grad.addColorStop(0, '#2e0249');
-        grad.addColorStop(1, '#a91079');
-        this.ctx.fillStyle = grad;
+        const complexity = parseInt(this.complexitySlider.value);
+        
+        const skyGrad = this.ctx.createLinearGradient(0, 0, 0, h);
+        const topColor = this.selectedPalette[0];
+        const bottomColor = this.selectedPalette[1] || '#a91079';
+        
+        skyGrad.addColorStop(0, this.getAdjustedColor(topColor));
+        skyGrad.addColorStop(1, this.getAdjustedColor(bottomColor));
+        this.ctx.fillStyle = skyGrad;
         this.ctx.fillRect(0, 0, w, h);
-        this.ctx.fillStyle = '#f9ca24';
+        
+        // Sun
+        const sunX = w * (0.3 + this.seededRandom(s++) * 0.4);
+        const sunY = h * (0.4 + this.seededRandom(s++) * 0.2);
+        const sunSize = 80 + this.seededRandom(s++) * 60;
+        
+        const sunGrad = this.ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, sunSize);
+        sunGrad.addColorStop(0, '#f9ca24');
+        sunGrad.addColorStop(1, 'rgba(249, 202, 36, 0)');
+        
+        this.ctx.fillStyle = sunGrad;
         this.ctx.beginPath();
-        this.ctx.arc(w/2, h/2, 100, 0, Math.PI*2);
+        this.ctx.arc(sunX, sunY, sunSize, 0, Math.PI * 2);
         this.ctx.fill();
+        
+        // Reflections/Clouds based on complexity
+        if (complexity > 30) {
+            for (let i = 0; i < complexity / 10; i++) {
+                const cx = (this.seededRandom(s++) * w + this.time * 20) % w;
+                const cy = sunY + (this.seededRandom(s++) - 0.5) * 200;
+                this.ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+                this.ctx.fillRect(cx, cy, 100, 2);
+            }
+        }
     }
 
     renderMandelbrot(seed) {
@@ -1501,13 +1529,19 @@ class AuraWall {
         const h = window.innerHeight;
         this.ctx.fillStyle = '#000';
         this.ctx.fillRect(0, 0, w, h);
-        const maxIter = 50;
-        const zoom = 1.2;
-        const step = 4; 
+        
+        let s = seed;
+        const complexity = parseInt(this.complexitySlider.value);
+        const maxIter = 30 + Math.floor(complexity / 2); // Resp to complexity
+        const zoom = 1.0 + this.seededRandom(s++) * 0.5; // Seeded zoom
+        const offsetX = (this.seededRandom(s++) - 0.5) * 0.5; // Seeded offset
+        const offsetY = (this.seededRandom(s++) - 0.5) * 0.5;
+        
+        const step = complexity > 80 ? 2 : 4; 
         for (let px = 0; px < w; px += step) {
             for (let py = 0; py < h; py += step) {
-                let x0 = (px / w - 0.5) * 3.5 / zoom - 0.5;
-                let y0 = (py / h - 0.5) * 2 / zoom;
+                let x0 = (px / w - 0.5) * 3.5 / zoom - 0.5 + offsetX;
+                let y0 = (py / h - 0.5) * 2 / zoom + offsetY;
                 let x = 0, y = 0, iter = 0;
                 while (x*x + y*y <= 4 && iter < maxIter) {
                     let xtemp = x*x - y*y + x0;
@@ -1517,7 +1551,7 @@ class AuraWall {
                 }
                 if (iter < maxIter) {
                     const color = this.selectedPalette[iter % this.selectedPalette.length];
-                    this.ctx.fillStyle = this.getAdjustedColor(color, iter / maxIter);
+                    this.ctx.fillStyle = this.getAdjustedColor(color, 0.5 + (iter / maxIter) * 0.5);
                     this.ctx.fillRect(px, py, step, step);
                 }
             }
@@ -1529,9 +1563,16 @@ class AuraWall {
         const h = window.innerHeight;
         this.ctx.fillStyle = '#000';
         this.ctx.fillRect(0, 0, w, h);
-        const cx = -0.7 + Math.sin(this.time * 0.5) * 0.1, cy = 0.27015;
-        const maxIter = 40;
-        const step = 4;
+        
+        let s = seed;
+        const complexity = parseInt(this.complexitySlider.value);
+        const maxIter = 25 + Math.floor(complexity / 3);
+        
+        // Seeded constants
+        const cx = -0.7 + Math.sin(this.time * 0.5 + s) * 0.1 + (this.seededRandom(s++) - 0.5) * 0.2;
+        const cy = 0.27015 + (this.seededRandom(s++) - 0.5) * 0.1;
+        
+        const step = complexity > 80 ? 2 : 4;
         for (let px = 0; px < w; px += step) {
             for (let py = 0; py < h; py += step) {
                 let x = (px / w - 0.5) * 3;
@@ -1545,7 +1586,7 @@ class AuraWall {
                 }
                 if (iter < maxIter) {
                     const color = this.selectedPalette[iter % this.selectedPalette.length];
-                    this.ctx.fillStyle = this.getAdjustedColor(color, iter / maxIter);
+                    this.ctx.fillStyle = this.getAdjustedColor(color, 0.5 + (iter / maxIter) * 0.5);
                     this.ctx.fillRect(px, py, step, step);
                 }
             }
@@ -1688,24 +1729,48 @@ class AuraWall {
     }
 
     renderPlasma(seed) {
+        let s = seed;
         const w = window.innerWidth;
         const h = window.innerHeight;
-        const grad = this.ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, w);
-        grad.addColorStop(0, this.getAdjustedColor(this.selectedPalette[0], 0.5));
-        grad.addColorStop(1, '#000');
-        this.ctx.fillStyle = grad;
-        this.ctx.fillRect(0, 0, w, h);
-    }
-
-    renderWormhole(seed) {
-        const w = window.innerWidth;
-        const h = window.innerHeight;
+        const complexity = parseInt(this.complexitySlider.value);
+        
+        // Multi-layered seeded gradient
         this.ctx.fillStyle = '#000';
         this.ctx.fillRect(0, 0, w, h);
-        for(let i=0; i<10; i++) {
-            this.ctx.strokeStyle = this.getAdjustedColor(this.selectedPalette[i%3], 0.3);
+        
+        const count = Math.floor(complexity / 20) + 2;
+        for (let i = 0; i < count; i++) {
+            const x = w * (0.2 + this.seededRandom(s++) * 0.6) + Math.sin(this.time + s) * 50;
+            const y = h * (0.2 + this.seededRandom(s++) * 0.6) + Math.cos(this.time + s) * 50;
+            const rad = this.seededRandom(s++) * w * 0.8 + 200;
+            
+            const color = this.selectedPalette[i % this.selectedPalette.length];
+            const grad = this.ctx.createRadialGradient(x, y, 0, x, y, rad);
+            grad.addColorStop(0, this.getAdjustedColor(color, 0.4 + (this.seededRandom(s++) * 0.2)));
+            grad.addColorStop(1, 'transparent');
+            
+            this.ctx.fillStyle = grad;
+    renderWormhole(seed) {
+        let s = seed;
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        const complexity = parseInt(this.complexitySlider.value);
+        
+        this.ctx.fillStyle = '#000';
+        this.ctx.fillRect(0, 0, w, h);
+        
+        const count = Math.floor(complexity / 5) + 5;
+        const centerX = w / 2 + this.mouse.x * 100 + (this.seededRandom(s++) - 0.5) * 100;
+        const centerY = h / 2 + this.mouse.y * 100 + (this.seededRandom(s++) - 0.5) * 100;
+        
+        for (let i = 0; i < count; i++) {
+            const color = this.selectedPalette[i % this.selectedPalette.length];
+            this.ctx.strokeStyle = this.getAdjustedColor(color, 0.3);
+            this.ctx.lineWidth = 1 + (i / count) * 4;
             this.ctx.beginPath();
-            this.ctx.arc(w/2 + this.mouse.x*100, h/2 + this.mouse.y*100, (i*60 + this.time*200)%600, 0, Math.PI*2);
+            
+            const radius = (i * (600 / count) + this.time * 200 + this.seededRandom(s++) * 100) % 800;
+            this.ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
             this.ctx.stroke();
         }
     }
@@ -1723,13 +1788,20 @@ class AuraWall {
     }
 
     renderHologram(seed) {
+        let s = seed;
         const w = window.innerWidth;
         const h = window.innerHeight;
-        this.ctx.fillStyle = 'rgba(0, 255, 255, 0.05)';
+        const complexity = parseInt(this.complexitySlider.value);
+        
+        const baseColor = this.selectedPalette[Math.floor(this.seededRandom(s++) * this.selectedPalette.length)];
+        this.ctx.fillStyle = this.getAdjustedColor(baseColor, 0.05);
         this.ctx.fillRect(0, 0, w, h);
-        for(let i=0; i<h; i+=8) {
-            this.ctx.fillStyle = 'rgba(0, 255, 255, 0.1)';
-            this.ctx.fillRect(0, i + Math.sin(this.time*5)*5, w, 1);
+        
+        const lineSpacing = 12 - (complexity / 10);
+        for (let i = 0; i < h; i += lineSpacing) {
+            const glitchOffset = this.seededRandom(s + Math.floor(i / 10)) > 0.95 ? (this.seededRandom(s++) - 0.5) * 20 : 0;
+            this.ctx.fillStyle = this.getAdjustedColor(baseColor, 0.1 + Math.sin(this.time * 5 + i * 0.1) * 0.05);
+            this.ctx.fillRect(0, i + Math.sin(this.time * 5) * 5 + glitchOffset, w, 1);
         }
     }
 
@@ -1765,24 +1837,53 @@ class AuraWall {
     }
 
     renderPaper(seed) {
+        let s = seed;
         const w = window.innerWidth;
         const h = window.innerHeight;
+        const complexity = parseInt(this.complexitySlider.value);
+        
         this.ctx.fillStyle = '#f5f5f5';
         this.ctx.fillRect(0, 0, w, h);
+        
+        // Fold/Layer 1
         this.ctx.fillStyle = '#e8e8e8';
         this.ctx.beginPath();
         this.ctx.moveTo(0, h);
-        this.ctx.lineTo(w, h-300);
+        const foldHeight = 200 + this.seededRandom(s++) * 200;
+        this.ctx.lineTo(w, h - foldHeight);
         this.ctx.lineTo(w, h);
         this.ctx.fill();
+        
+        // Additional layers based on complexity
+        const layers = Math.floor(complexity / 20);
+        for (let i = 0; i < layers; i++) {
+            this.ctx.fillStyle = `rgba(0, 0, 0, ${0.05 + this.seededRandom(s++) * 0.05})`;
+            this.ctx.beginPath();
+            const x1 = this.seededRandom(s++) * w;
+            const y1 = this.seededRandom(s++) * h;
+            this.ctx.moveTo(x1, y1);
+            this.ctx.lineTo(x1 + this.seededRandom(s++) * 400, y1 + this.seededRandom(s++) * 400);
+            this.ctx.lineTo(x1, y1 + this.seededRandom(s++) * 400);
+            this.ctx.fill();
+        }
     }
 
     renderSoft(seed) {
+        let s = seed;
         const w = window.innerWidth;
         const h = window.innerHeight;
-        const grad = this.ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, w);
-        grad.addColorStop(0, '#fff');
-        grad.addColorStop(1, '#eee');
+        const complexity = parseInt(this.complexitySlider.value);
+        
+        const c1 = this.selectedPalette[Math.floor(this.seededRandom(s++) * this.selectedPalette.length)];
+        const c2 = this.selectedPalette[Math.floor(this.seededRandom(s++) * this.selectedPalette.length)];
+        
+        const cx = w * (0.3 + this.seededRandom(s++) * 0.4);
+        const cy = h * (0.3 + this.seededRandom(s++) * 0.4);
+        
+        const grad = this.ctx.createRadialGradient(cx, cy, 0, cx, cy, w * (0.5 + complexity / 100));
+        grad.addColorStop(0, this.getAdjustedColor(c1, 0.4));
+        grad.addColorStop(1, this.getAdjustedColor(c2, 0.1));
+        
         this.ctx.fillStyle = grad;
         this.ctx.fillRect(0, 0, w, h);
     }
