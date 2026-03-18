@@ -191,7 +191,22 @@ button {
     align-items: center;
     font-family: var(--font-body);
     font-size: 0.85rem;
-    transition: all 0.3s ease;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.dropdown-trigger svg {
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.custom-dropdown.open .dropdown-trigger {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+.custom-dropdown.open .dropdown-trigger svg {
+    transform: rotate(180deg);
 }
 
 .dropdown-trigger:hover {
@@ -201,17 +216,17 @@ button {
 
 .dropdown-menu {
     position: absolute;
-    top: calc(100% + 10px); /* Open downwards as requested */
+    top: 100%; /* Attached to trigger */
     left: 0;
     width: 100%;
     max-height: 300px;
     overflow-y: auto;
-    overflow-x: hidden; /* Prevent horizontal scroll */
-    background: rgba(10, 10, 15, 0.95);
+    overflow-x: hidden;
+    background: rgba(255, 255, 255, 0.1);
     backdrop-filter: blur(25px);
     -webkit-backdrop-filter: blur(25px);
     border: 1px solid var(--glass-border);
-    border-radius: 1rem;
+    border-radius: 0 0 1rem 1rem; /* Flat top to attach */
     list-style: none;
     padding: 0.5rem;
     display: none;
