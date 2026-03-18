@@ -1,0 +1,26 @@
+{
+  "name": "aurawall",
+  "version": "1.0.0",
+  "description": "AuraWall is a high-performance, browser-based generative art studio that creates unique wallpapers for any screen size. It's built for those who want a fresh, artistic background every day without relying on external image APIs.",
+  "main": "script.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/anisarzoo/AuraWall.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/anisarzoo/AuraWall/issues"
+  },
+  "homepage": "https://github.com/anisarzoo/AuraWall#readme",
+  "dependencies": {
+    "@capacitor/android": "^8.2.0",
+    "@capacitor/cli": "^8.2.0",
+    "@capacitor/core": "^8.2.0"
+  }
+}

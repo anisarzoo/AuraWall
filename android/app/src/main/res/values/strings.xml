@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">AuraWall</string>
+    <string name="title_activity_main">AuraWall</string>
+    <string name="package_name">com.anisarzoo.aurawall</string>
+    <string name="custom_url_scheme">com.anisarzoo.aurawall</string>
+</resources>
